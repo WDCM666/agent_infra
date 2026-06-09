@@ -1,0 +1,9 @@
+[
+  {
+    "name": "inspect_then_act",
+    "description": "Inspect the current room and identify relevant objects before manipulating them.",
+    "steps": ["look around", "identify target object", "choose the next valid interaction"],
+    "tags": ["alfworld", "exploration"],
+    "metadata": {}
+  }
+]

@@ -1,0 +1,9 @@
+[
+  {
+    "name": "filter_by_requirements",
+    "description": "Extract product constraints from the instruction and use them to filter search results.",
+    "steps": ["parse user requirements", "search with key terms", "compare candidates", "choose matching product"],
+    "tags": ["webshop", "search"],
+    "metadata": {}
+  }
+]
