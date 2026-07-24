@@ -12,6 +12,9 @@ class ReflexionAgent(BaseAgent):
         if reflection:
             self.reflections.append(reflection)
 
+    def reset_reflections(self) -> None:
+        self.reflections = []
+
     def act(self, observation, model_output=None, **kwargs) -> AgentOutput:
         prompt = self.build_prompt(observation, reflections=self.reflections, **kwargs)
         action = self.parse_action(model_output if model_output is not None else prompt)

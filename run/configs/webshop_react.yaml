@@ -1,0 +1,31 @@
+# Run WebShop with ReAct agent
+# Usage: python -m run.run --config run/configs/webshop_react.yaml
+#
+# Prerequisites:
+#   conda activate verl-agent-webshop
+#   export JAVA_HOME="/opt/homebrew/Cellar/openjdk@17/17.0.19/libexec/openjdk.jdk/Contents/Home"
+#   export JVM_PATH="$JAVA_HOME/lib/server/libjvm.dylib"
+#   export PATH="$JAVA_HOME/bin:$PATH"
+
+name: "webshop_react"
+agent_type: "react"                # react | reflexion | memory | skill | direct
+
+llm:
+  provider: "openai"               # openai | anthropic
+  model: "gpt-4o"
+  api_key: "${OPENAI_API_KEY}"     # resolved from environment variable
+  # base_url: "http://localhost:8000/v1"   # 自定义端点（vLLM / Ollama 等），不配则用 OpenAI 默认
+  temperature: 0.0
+  max_tokens: 512
+
+env:
+  name: "webshop"                  # alfworld | webshop | search | sokoban | gym_cards | appworld
+  history_length: 10               # number of past steps to include in prompt
+  max_steps: 30                    # max steps per episode
+  seed: 42
+  kwargs:
+    use_small: true                # use small dataset (1000 items) for testing
+    human_goals: true              # use human-authored goal instructions
+
+num_episodes: 1
+verbose: true

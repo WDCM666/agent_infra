@@ -1,0 +1,7 @@
+# Dependencies for the standalone runner (run/)
+# Install: pip install -r run/requirements.txt
+
+pyyaml>=6.0
+omegaconf>=2.3
+openai>=1.0          # for OpenAI / OpenAI-compatible APIs
+# anthropic>=0.30    # uncomment if using Anthropic directly

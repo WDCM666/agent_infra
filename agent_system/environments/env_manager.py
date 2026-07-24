@@ -15,7 +15,6 @@
 
 from typing import List, Tuple, Dict, Union, Any
 from collections import defaultdict
-import torch
 import numpy as np
 from functools import partial
 import os
@@ -133,6 +132,9 @@ class SearchEnvironmentManager(EnvironmentManagerBase):
 class AlfWorldEnvironmentManager(EnvironmentManagerBase):
     def __init__(self, envs, projection_f, config):
         self.memory = SimpleMemory()
+        alfworld_config = getattr(config.env, "alfworld", {})
+        self.action_space = str(getattr(alfworld_config, "action_space", "admissible")).lower()
+        self.prompt_style = str(getattr(alfworld_config, "prompt_style", "grammar_react")).lower()
         super().__init__(envs, projection_f, config)
     
     def reset(self, kwargs):
@@ -148,7 +150,38 @@ class AlfWorldEnvironmentManager(EnvironmentManagerBase):
         return {'text': full_text_obs, 'image': image_obs, 'anchor': text_obs}, infos
     
     def step(self, text_actions: List[str]):
-        actions, valids = self.projection_f(text_actions, self.envs.get_admissible_commands)
+        if self._uses_think_actions() and all(self._is_think_action(a) for a in text_actions):
+            actions = [str(a).strip().lstrip("> ").strip() for a in text_actions]
+            text_obs = ["OK." for _ in actions]
+            image_obs = None
+            rewards = np.zeros(len(actions), dtype=np.float32)
+            dones = np.zeros(len(actions), dtype=bool)
+            infos = []
+
+            self.memory.store({'text_obs': self.pre_text_obs, 'action': actions})
+            self.pre_text_obs = text_obs
+            full_text_obs = self.build_text_obs(text_obs, self.envs.get_admissible_commands)
+
+            for i, action in enumerate(actions):
+                infos.append({
+                    "won": False,
+                    "admissible_commands": self.envs.get_admissible_commands[i],
+                    "observation_text": text_obs[i],
+                    "extra.gamefile": self.gamefile[i] if i < len(self.gamefile) else None,
+                    "is_action_valid": to_numpy(True),
+                    "action_space": self.action_space,
+                    "executed_action": action,
+                    "is_think_action": True,
+                })
+
+            next_observations = {'text': full_text_obs, 'image': image_obs, 'anchor': text_obs}
+            return next_observations, rewards, dones, infos
+
+        actions, valids = self.projection_f(
+            text_actions,
+            self.envs.get_admissible_commands,
+            action_space=self.action_space,
+        )
         text_obs, image_obs, rewards, dones, infos = self.envs.step(actions)
         self.memory.store({'text_obs': self.pre_text_obs, 'action': actions})
         self.pre_text_obs = text_obs
@@ -160,6 +193,8 @@ class AlfWorldEnvironmentManager(EnvironmentManagerBase):
         # add action_valid to infos
         for i, info in enumerate(infos):
             info['is_action_valid'] = to_numpy(valids[i])
+            info['action_space'] = self.action_space
+            info['executed_action'] = actions[i]
 
         next_observations = {'text': full_text_obs, 'image': image_obs, 'anchor': text_obs}
         rewards = to_numpy(rewards)
@@ -189,27 +224,109 @@ class AlfWorldEnvironmentManager(EnvironmentManagerBase):
                     action_key="action")
             
         for i in range(len(text_obs)):
+            if self._uses_direct_prompt():
+                obs = ALFWORLD_DIRECT_GENERATION_TEMPLATE.format(
+                    current_observation=text_obs[i],
+                )
+                postprocess_text_obs.append(obs)
+                continue
+            if self._uses_official_react_prompt():
+                obs = build_alfworld_official_react_prompt(
+                    self.gamefile[i] if i < len(self.gamefile) else None,
+                    self.tasks[i] if i < len(self.tasks) else "",
+                    self._build_official_react_interaction(i, text_obs[i]),
+                )
+                postprocess_text_obs.append(obs)
+                continue
+            if self._uses_grammar_step_prompt():
+                obs = build_alfworld_grammar_step_prompt(
+                    self._build_official_react_interaction(i, text_obs[i]),
+                )
+                postprocess_text_obs.append(obs)
+                continue
+
             # exclude 'help' in admissible_actions[i]
             reformatted_admissible_actions = "\n ".join(f"'{s}'" for s in admissible_actions[i] if s != 'help')
 
             if init or self.config.env.history_length <= 0:
-                obs = ALFWORLD_TEMPLATE_NO_HIS.format(
-                    current_observation=text_obs[i],
-                    admissible_actions=reformatted_admissible_actions
-                )
+                if self.action_space == "generation":
+                    obs = ALFWORLD_GENERATION_TEMPLATE_NO_HIS.format(
+                        current_observation=text_obs[i],
+                    )
+                else:
+                    obs = ALFWORLD_ADMISSIBLE_TEMPLATE_NO_HIS.format(
+                        current_observation=text_obs[i],
+                        admissible_actions=reformatted_admissible_actions
+                    )
             else:
-                obs = ALFWORLD_TEMPLATE.format(
-                    task_description=self.tasks[i],
-                    step_count=len(self.memory[i]),
-                    history_length=valid_lens[i],
-                    action_history=memory_contexts[i],
-                    current_step=len(self.memory[i]) + 1,
-                    current_observation=text_obs[i],
-                    admissible_actions=reformatted_admissible_actions
-                )
+                if self.action_space == "generation":
+                    obs = ALFWORLD_GENERATION_TEMPLATE.format(
+                        task_description=self.tasks[i],
+                        step_count=len(self.memory[i]),
+                        history_length=valid_lens[i],
+                        action_history=memory_contexts[i],
+                        current_step=len(self.memory[i]) + 1,
+                        current_observation=text_obs[i],
+                    )
+                else:
+                    obs = ALFWORLD_ADMISSIBLE_TEMPLATE.format(
+                        task_description=self.tasks[i],
+                        step_count=len(self.memory[i]),
+                        history_length=valid_lens[i],
+                        action_history=memory_contexts[i],
+                        current_step=len(self.memory[i]) + 1,
+                        current_observation=text_obs[i],
+                        admissible_actions=reformatted_admissible_actions
+                    )
 
             postprocess_text_obs.append(obs)
         return postprocess_text_obs
+
+    def _uses_official_react_prompt(self) -> bool:
+        return self.action_space == "generation" and self.prompt_style in {
+            "official_react",
+            "official_grammar_react",
+            "official_grammar_sync_react",
+        }
+
+    def _uses_direct_prompt(self) -> bool:
+        return self.action_space == "generation" and self.prompt_style == "direct_grammar"
+
+    def _uses_grammar_step_prompt(self) -> bool:
+        return self.action_space == "generation" and self.prompt_style == "grammar_step_react"
+
+    def _uses_think_actions(self) -> bool:
+        return self.action_space == "generation" and self.prompt_style in {
+            "official_react",
+            "official_grammar_react",
+            "grammar_step_react",
+        }
+
+    @staticmethod
+    def _is_think_action(action: str) -> bool:
+        return str(action).strip().lstrip("> ").strip().lower().startswith("think:")
+
+    @staticmethod
+    def _process_official_react_observation(obs: str) -> str:
+        text = str(obs)
+        if text.startswith("-= Welcome to TextWorld"):
+            return "\n\n".join(text.split("\n\n")[1:]).strip()
+        return text.strip()
+
+    def _build_official_react_interaction(self, env_idx: int, current_observation: str) -> str:
+        history = list(self.memory[env_idx]) if len(self.memory[env_idx]) > 0 else []
+        if not history:
+            return self._process_official_react_observation(current_observation) + "\n>"
+
+        lines = [self._process_official_react_observation(history[0]["text_obs"])]
+        for idx, record in enumerate(history):
+            next_obs = (
+                history[idx + 1]["text_obs"]
+                if idx + 1 < len(history)
+                else current_observation
+            )
+            lines.append(f"> {record['action']}\n{self._process_official_react_observation(next_obs)}")
+        return "\n".join(lines) + "\n>"
 
     def _process_batch(self, batch_idx, total_batch_list, total_infos, success):
         # Find the last entry with active masks

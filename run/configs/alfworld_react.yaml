@@ -1,0 +1,45 @@
+# Run ALFWorld with ReAct agent
+# Usage: python -m run.run --config run/configs/alfworld_react.yaml
+
+name: "alfworld_react"
+agent_type: "react"                # react | reflexion | memory | skill | direct
+
+llm:
+  provider: "openai"               # openai | anthropic
+  model: "qwen3.5-27b"
+  api_key: "sk-1a95a302957d4556837500a25b2f73b1"     # resolved from environment variable
+  base_url: "https://llm-bc06pgqdq9sn28ib.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"   # 自定义端点（vLLM / Ollama 等），不配则用 OpenAI 默认
+  temperature: 0.0
+  max_tokens: 192
+  stop: ["\n"]                         # official ReAct generates one line per turn
+  extra_body:
+    enable_thinking: false
+
+env:
+  name: "alfworld"                 # alfworld | webshop | search | sokoban | gym_cards | appworld
+  history_length: 10               # number of past steps to include in prompt
+  max_steps: 50                    # max steps per episode
+  seed: 42
+  kwargs:
+    eval_dataset: "eval_in_distribution"   # eval_in_distribution | eval_out_of_distribution
+    action_space: "generation"             # admissible | generation
+    prompt_style: "official_grammar_react"  # direct_grammar | grammar_react | grammar_step_react | official_react | official_grammar_react | official_grammar_sync_react
+    # num_trials: 3                     # used by agent_type=reflexion; retry same game after a failed attempt
+    # Common ALFWorld config overrides. These override env_package/alfworld/configs/config_tw.yaml.
+    # num_eval_games: -1
+    # task_types: [1, 2, 3, 4, 5, 6]
+    # domain_randomization: false
+    # goal_desc_human_anns_prob: 0.0
+    # expert_timeout_steps: 150
+    # hide_init_receptacles: false
+    # config_overrides:
+    #   dataset:
+    #     num_eval_games: 20
+    #   env:
+    #     task_types: [1]
+    #   general:
+    #     hide_init_receptacles: false
+
+num_episodes: 1
+num_agents: 1
+verbose: true

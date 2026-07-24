@@ -14,14 +14,31 @@
 # limitations under the License.
 
 from typing import List, Tuple, Dict, Union, Any
-import torch
 import numpy as np
 import os
 from agent_system.environments.prompts import *
 from collections import defaultdict
 
+# torch is only needed for isinstance checks in to_numpy / save_image;
+# make it optional so the standalone runner doesn't require PyTorch.
+try:
+    import torch as _torch
+    _HAS_TORCH = True
+except ImportError:
+    _torch = None
+    _HAS_TORCH = False
+
+
+def _is_tensor(x) -> bool:
+    """Check whether *x* is a PyTorch tensor, without requiring torch."""
+    if _HAS_TORCH:
+        return isinstance(x, _torch.Tensor)
+    # duck-type fallback when torch is not installed
+    return hasattr(x, "detach") and hasattr(x, "cpu")
+
+
 def to_numpy(data):
-    if isinstance(data, torch.Tensor):
+    if _is_tensor(data):
         data = data.detach().cpu().numpy()
     elif isinstance(data, np.ndarray):
         pass
@@ -153,7 +170,7 @@ class EnvironmentManagerBase:
         if not os.path.exists(path):
             os.makedirs(path)
         path = os.path.join(path, f"step{step}.png")
-        if isinstance(image, torch.Tensor):
+        if _is_tensor(image):
             image = image.detach().cpu().numpy()
         if isinstance(image, np.ndarray):
             pass
